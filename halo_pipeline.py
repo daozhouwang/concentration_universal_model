@@ -2,12 +2,19 @@
 Halo Analysis Pipeline
 ======================
 
-Unified interface for the two-step halo analysis pipeline.
+Unified interface for the two-step halo analysis pipeline (Paper I & Paper II).
 
 Usage: python halo_pipeline.py [cosmology] [redshift] [mode]
-Modes: peak, mean, median, or all (default: peak)
-Example: python halo_pipeline.py planck18 0.0
-         python halo_pipeline.py planck18 0.0 mean
+Modes:
+  - Paper I  (statistical c -> ./output_halo_properties/):
+      peak, mean, median, or all (default: peak)
+  - Paper II (individual halo c & c distribution -> ./output_individual_halo_properties/):
+      relaxed, all_halos, relaxed_einasto, or individual
+      * If input_masses.dat has 2 columns (Mass  z_f): computes exact omega_f and c for each halo.
+      * If input_masses.dat has 1 column  (Mass):      Monte Carlo samples P(omega_f) to predict c(M) distribution.
+Example:
+  python halo_pipeline.py planck18 0.0
+  python halo_pipeline.py planck18 0.0 individual
 """
 import sys
 import subprocess
@@ -19,10 +26,6 @@ def main():
 
     if len(sys.argv) < 3 or len(sys.argv) > 4:
         print(__doc__)
-        print("Arguments:")
-        print("  cosmology  : Cosmology model (planck18, WMAP7, etc.)")
-        print("  redshift   : Redshift value (e.g., 0.0)")
-        print("  mode       : Fit mode: peak, mean, median, or all (optional, default: peak)")
         sys.exit(1)
     
     # halo mass file
@@ -33,13 +36,20 @@ def main():
     
     mode_input = sys.argv[3].lower() if len(sys.argv) == 4 else 'peak'
     
-    valid_modes = ['peak', 'mean', 'median']
+    paper1_modes = ['peak', 'mean', 'median']
+    paper2_modes = ['relaxed', 'all_halos', 'relaxed_einasto']
+
     if mode_input == 'all':
-        modes_to_run = valid_modes
-    elif mode_input in valid_modes:
+        modes_to_run = paper1_modes
+    elif mode_input == 'individual':
+        modes_to_run = paper2_modes
+    elif mode_input in paper1_modes or mode_input in paper2_modes:
         modes_to_run = [mode_input]
     else:
-        print(f"ERROR: Invalid mode '{mode_input}'. Please choose from: peak, mean, median, all")
+        print(
+            f"ERROR: Invalid mode '{mode_input}'. "
+            "Choose from: peak, mean, median, all, relaxed, all_halos, relaxed_einasto, individual"
+        )
         sys.exit(1)
         
     # halo identification
@@ -90,7 +100,9 @@ def main():
     generated_files = []
     
     for current_mode in modes_to_run:
-        for current_def in halo_defs:
+        # relaxed_einasto is calibrated specifically under the 200c definition (Paper II Eq. 8)
+        defs_for_mode = ['200c'] if current_mode == 'relaxed_einasto' else halo_defs
+        for current_def in defs_for_mode:
             print(f"\n--- Processing: Mode = {current_mode.upper()}, Def = {current_def.upper()} ---")
             
             cmd2 = ["python", "halo_model.py", "output_variance.dat", cosmology, redshift, current_def, current_mode]
@@ -102,7 +114,11 @@ def main():
                 print(f"ERROR: Step 2 failed for {current_def} {current_mode}")
                 sys.exit(1)
                 
-            expected_output = f"./output_halo_properties/halo_properties_{redshift}_{cosmology}_{current_def}_{current_mode}.dat"
+            if current_mode in paper2_modes:
+                expected_output = f"./output_individual_halo_properties/c_distribution_{float(redshift)}_{cosmology}_{current_def}_{current_mode}.dat"
+            else:
+                expected_output = f"./output_halo_properties/halo_properties_{float(redshift)}_{cosmology}_{current_def}_{current_mode}.dat"
+
             if os.path.exists(expected_output):
                 generated_files.append(expected_output)
             else:
